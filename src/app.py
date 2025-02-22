@@ -16,6 +16,8 @@ def get_greeting(hour):
         return "🌙 Good Evening, Student!"
 
 def main():
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
     st.markdown('# 📚 Scholar.ai', unsafe_allow_html=True)
 
     st.markdown('<p class="subtitle">Your Intelligent Learning Companion</p>', unsafe_allow_html=True)
@@ -46,13 +48,11 @@ def main():
 
         Think of me as your **24/7 study partner**—here to make your study sessions smarter, not harder. Ready to crush your goals? Let's get started! 🚀 """)
     
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    
     
     if "chat_history" not in st.session_state:
         st.session_state["chat_history"] = []
     
-    if "processed_doc" not in st.session_state:
-        st.session_state["processed_doc"] = None
     
     uploaded_file = st.file_uploader(
         "📎 Drop your study material here",
@@ -64,34 +64,52 @@ def main():
             st.success(f"🎉 Thank you for sharing {uploaded_file.name}! I'll review it and then we can have a discussion about it.😊")
             
             file_path = os.path.join(UPLOAD_FOLDER, uploaded_file.name)
-            
-            documentProcessor = DocumentProcessing(file_path,st)
-            total_pages = documentProcessor.get_pdf_page_count()
 
             file_details = {
                 "📄 Document Name": uploaded_file.name,
-                "📊 Size": f"{uploaded_file.size / 1024:.2f} KB",
-                "Number of Pages": total_pages
+                "📊 Size": f"{uploaded_file.size / 1024:.2f} KB"
             }
             st.json(file_details)
             st.session_state.document_details = file_details
-            st.session_state.document_details["total_pages"] = total_pages
 
             with st.spinner("🔍 Reading through your document... This might take a moment!"):
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 
-                mark_down_docs = documentProcessor.load_markdown_document()
-    
-                documentProcessor.create_vectorStore(docs=mark_down_docs)
+                documentProcessor = DocumentProcessing(file_path,st)
 
-                text_input = mark_down_docs[:10]
+                total_pages = documentProcessor.get_pdf_page_count()
 
-                table_of_contents = documentProcessor.extract_table_of_contents(text_input=text_input)
+                st.session_state.document_details["total_pages"] = total_pages
 
+                if not documentProcessor.collection.find_one({"source":uploaded_file.name}):
                 
-                st.session_state["processed_doc"] = {"file_path": file_path,"table_of_contents": table_of_contents, }
-            
+                    mark_down_docs = documentProcessor.load_markdown_document()
+        
+                    documentProcessor.create_vectorStore(docs=mark_down_docs)
+
+                    text_input = mark_down_docs[:10]
+
+                    table_of_contents = documentProcessor.extract_table_of_contents(text_input=text_input)
+
+                    documentProcessor.collection.insert_one({"field":"table_of_contents","data":table_of_contents})
+                
+                else:
+
+                    cursor = documentProcessor.collection.find_one({"field":"table_of_contents"})
+
+                    if cursor:
+
+                        table_of_contents = cursor.get("data")
+
+                    else:
+                        query = {"page_number": {"$gte": 0, "$lte": 11}}
+
+                        documents = documentProcessor.collection.find(query)
+
+                        table_of_contents = "\n ".join(doc["text"] for doc in documents if "text" in doc)
+
+
             st.session_state["recommended_questions"] = []
 
             st.success("🎉 Your document is ready for learning!")
