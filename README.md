@@ -27,8 +27,7 @@ Your ultimate study buddy is here to make learning easier, faster, and more enga
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/scholar.ai.git
-cd scholar-ai
+git clone [https://github.com/niranjan-404/Scholar.ai.git](https://github.com/niranjan-404/Scholar.ai.git)
 ```
 
 2. Create and activate a virtual environment:
@@ -45,11 +44,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. Set up environment variables:
+4. Set up environment variables:
    - as per file env.template
 
 
-4. Start the application:
+5. Start the application:
 ```bash
 streamlit run app.py 
 ```
