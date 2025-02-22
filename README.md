@@ -55,7 +55,7 @@ streamlit run app.py
 
 1. **Upload Study Material**
    - Click the upload button
-   - Select your study material (PDF, DOCX, or images)
+   - Select your study material (PDF)
    - Wait for processing
 
 2. **Interact with Content**
