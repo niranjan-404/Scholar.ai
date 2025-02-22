@@ -27,7 +27,7 @@ Your ultimate study buddy is here to make learning easier, faster, and more enga
 
 1. Clone the repository:
 ```bash
-git clone [https://github.com/niranjan-404/Scholar.ai.git](https://github.com/niranjan-404/Scholar.ai.git)
+git clone https://github.com/niranjan-404/Scholar.ai.git
 ```
 
 2. Create and activate a virtual environment:
