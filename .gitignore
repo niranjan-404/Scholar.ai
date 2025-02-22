@@ -156,6 +156,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+#files
+*.pdf
+*.docx
+
 # pytype static type analyzer
 .pytype/
 
