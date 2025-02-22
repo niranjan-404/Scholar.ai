@@ -1,8 +1,6 @@
 # Scholar.ai 📚
 ### Your Intelligent Learning Companion
 
-![Scholar.ai Banner](banner-placeholder.png)
-
 Good Evening, Scholar! 👋
 
 Your ultimate study buddy is here to make learning easier, faster, and more engaging! Scholar.ai helps you comprehend complex academic materials through AI-powered analysis and interactive learning tools.
