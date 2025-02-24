@@ -84,15 +84,20 @@ def main():
 
                 if not documentProcessor.collection.find_one({"source":uploaded_file.name}):
                 
-                    mark_down_docs = documentProcessor.load_markdown_document()
+                    mark_down_docs , data_for_model = documentProcessor.load_markdown_document()
+
+                    result = documentProcessor.extract_table_of_contents(text_input=data_for_model)
+
+                    table_of_contents = result["table_of_contents"]
+
+                    documentProcessor.page_number_correction = result["page_numbering_correction"]
+
+                    documentProcessor.table_of_contents = table_of_contents
         
                     documentProcessor.create_vectorStore(docs=mark_down_docs)
 
-                    text_input = mark_down_docs[:10]
+                    documentProcessor.collection.insert_one({"field":"table_of_contents","data":result["table_of_contents"],"page_numbering_correction":result["page_numbering_correction"]})
 
-                    table_of_contents = documentProcessor.extract_table_of_contents(text_input=text_input)
-
-                    documentProcessor.collection.insert_one({"field":"table_of_contents","data":table_of_contents})
                 
                 else:
 
@@ -102,12 +107,9 @@ def main():
 
                         table_of_contents = cursor.get("data")
 
-                    else:
-                        query = {"page_number": {"$gte": 0, "$lte": 11}}
+                        documentProcessor.table_of_contents = table_of_contents
 
-                        documents = documentProcessor.collection.find(query)
-
-                        table_of_contents = "\n ".join(doc["text"] for doc in documents if "text" in doc)
+                        documentProcessor.page_number_correction = cursor.get("page_numbering_correction")
 
 
             st.session_state["recommended_questions"] = []
@@ -186,8 +188,7 @@ def main():
                     with st.spinner("🧠 Thinking..."):
                         response, recommended_questions = documentProcessor.chat_with_document(
                             st.session_state.chat_history,
-                            user_question,
-                            table_of_contents
+                            user_question
                         )
                         
                         st.session_state.chat_history.append(HumanMessage(content=user_question))
