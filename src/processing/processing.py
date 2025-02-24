@@ -25,7 +25,6 @@ import base64
 from support_functions.mongodb_hybrid_search import mongodb_hybrid_search
 from support_functions.load_db_client import mongo_client
 from langchain_mongodb import MongoDBAtlasVectorSearch
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, StateGraph
 from langchain.agents import create_openai_functions_agent
 from mimetypes import guess_type
@@ -61,6 +60,8 @@ class DocumentProcessing:
             self.file_path = file_path
             self.collection = mongo_client["TEXT_BOOKS"]["DOCUMENT_EMBEDDINGS"]
             self.recommended_questions = []
+            self.page_number_correction = None
+            self.table_of_contents = None
 
         def create_vectorStore(self,docs):
                 
@@ -107,42 +108,89 @@ class DocumentProcessing:
         def extract_table_of_contents(self,text_input):
             
             writer_prompt = PromptTemplate(input_variables=["text_input"],
-                    template= '''You are a specialized document structure analyzer focused on extracting and formatting tables of contents into clean markdown. Your task is to:
+                    template= '''You are a specialized document structure analyzer focused on extracting and formatting the Table of Contents (ToC) from a provided document into clean markdown and identifying the correct page numbering offset.
 
-                        1. Analyze the provided document text and identify the hierarchical structure:
-                        - Main chapter titles and page numbers
-                        - Nested subheadings (e.g., 1.1, 1.1.2) with page numbers
-                        - Front matter (preface, acknowledgments)
-                        - Back matter (appendices, glossary, index)
-                        - Special sections or supplementary content
+                Instructions:
 
-                        2. Format the content hierarchy in markdown using:
-                        - # for main chapters
-                        - ## for first-level subheadings 
-                        - ### for second-level subheadings
-                        - #### for third-level subheadings
-                        - Preserve original numbering schemes within the headers
-                        - Right-align page numbers using markdown table syntax
+                1. Analyze the provided document text to extract the hierarchical structure of the Table of Contents, including:  
+                - Main chapters and their corresponding page numbers  
+                - Nested subheadings (e.g., `1.1`, `1.1.2`) with page numbers  
+                - Front matter (e.g., Preface, Acknowledgments)  
+                - Back matter (e.g., Appendices, Glossary, Index)  
+                - Special sections or supplementary content  
 
-                        3. Structure the output as:
-                        ```markdown
-                        # Chapter 1: [Title] ........................... [page]
-                        ## 1.1 [Subtitle] ............................. [page]
-                        ### 1.1.1 [Sub-subtitle] ...................... [page]
+                2. Format the extracted ToC into markdown, using the following structure:  
+                - `#` for main chapters  
+                - `##` for first-level subheadings  
+                - `###` for second-level subheadings  
+                - `####` for third-level subheadings  
+                - Preserve the original numbering within headers (e.g., `Chapter 1`, `1.1`, `1.1.1`).  
+                - Right-align page numbers using markdown table syntax.  
 
-                        Portion of text extracted from test book:
-                        {text_input}
-                    ''')
+                Example Output Format:  
+                ```markdown
+                # Chapter 1: [Title] ........................... [page]
+                ## 1.1 [Subtitle] ............................. [page]
+                ### 1.1.1 [Sub-subtitle] ...................... [page]
+                ```
+                
+                3. Determine the correct page numbering offset (`page_numbering_correction`).  
+                - In PDFs, the actual page number displayed in the document often differs from the physical page number in the file.  
+                - Identify the first PDF page where the actual page numbering starts (page number often appearing at the end of a page).
+                - Compute the correction value 
+                - Store this correction value as `'page_numbering_correction'`.  
+
+                
+                Example Explanation 1:  
+                - Page number in the document appears on PDF PAGE 6 and the number is 2.  
+                - Then correction value will be 4 (6-2)
+                "page_numbering_correction": 4
+
+                Example Explanation 2:  
+                - Page number in the document appears on PDF PAGE 5 and the number is 1.  
+                - Then correction value will be 4 (5-1)
+                "page_numbering_correction": 4
+                
+                Example Explanation 2:
+                - Page number in the document appears on PDF PAGE 7 and the number is 2 then 
+                - The correction value is 7 - 2 = 5 
+                "page_numbering_correction": 5 
+                - explanation because the 
+
+                Go through multiple PDF PAGE to confirm correct value for page_numbering_correction
+                DOuble check the correctness of page_numbering_correction before producing final output
+
+
+                4. Input Format:  
+                - The document pages will be provided as follows:  
+                ```
+                PDF PAGE 1: 
+                [DOCUMENT CONTENT]
+                ---
+                PDF PAGE 2: 
+                [DOCUMENT CONTENT]
+                ---
+                PDF PAGE 3:
+                [DOCUMENT CONTENT]
+                ..........
+                ---
+                PDF PAGE N: 
+                [DOCUMENT CONTENT]
+                ```
+
+
+                Portion of text extracted from test book:
+                {text_input}
+
+                output should be a valid json dict with keys 'table_of_contents' with str value and 'page_numbering_correction' with integer value
+                ''')
             
             if not isinstance(text_input, str):
                 text_input = str(text_input)
 
-            chain = writer_prompt | self.llm  | StrOutputParser()
+            chain = writer_prompt | self.primary_llm  | JsonOutputParser()
+
             output_text = chain.invoke({"text_input":text_input})
-            
-            self.st.subheader("📌 Extracted Table of content:")
-            
-            self.st.success(output_text)
 
             return output_text
 
@@ -154,6 +202,8 @@ class DocumentProcessing:
                 file_name = Path(self.file_path).name
 
                 parsed_docs = []
+
+                first_twelve_pages = ""
 
                 for page_number, page in enumerate(doc, start=1):
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
@@ -171,6 +221,9 @@ class DocumentProcessing:
 
                         markdown_sections = markdown_splitter.split_text(page_markdown)
 
+                        if page_number < 13:
+                                first_twelve_pages += f"PDF PAGE {page_number}: \n{page_markdown}\n---\n"
+
                         for section in markdown_sections:
                                 for key_ in section.metadata.keys():
                                         if key_ in ["Header 2","Header 1"]: 
@@ -181,7 +234,7 @@ class DocumentProcessing:
                         
                         parsed_docs.append(section)
 
-                return parsed_docs
+                return parsed_docs , first_twelve_pages
 
         def load_langchain_doc(self):
             if self.file_path.endswith('.pdf'):
@@ -210,6 +263,7 @@ class DocumentProcessing:
             Returns:
             - List of extracted image file paths.
             """
+
             os.makedirs(output_dir, exist_ok=True)
             extracted_images = []
 
@@ -354,11 +408,29 @@ class DocumentProcessing:
                                 elif not ending_page:
                                         ending_page = self.st.session_state.document_details["total_pages"]
 
-                                if starting_page!= ending_page:
+                                if starting_page != ending_page:
+                                        if self.page_number_correction:
+                                                if ending_page != self.st.session_state.document_details["total_pages"]:
+                                                        if ending_page + self.page_number_correction > self.st.session_state.document_details["total_pages"]:
+                                                              ending_page = self.st.session_state.document_details["total_pages"]
+                                                        else:
+                                                              ending_page = ending_page + self.page_number_correction
+                                                
+                                                if starting_page + self.page_number_correction > self.st.session_state.document_details["total_pages"]:
+                                                        
+                                                        starting_page  = starting_page + self.page_number_correction
+
                                         query = {"page_number": {"$gte": starting_page, "$lte": ending_page}}
                                         documents = list(self.collection.find(query))
                                 else:
-                                        query = {"page_number": ending_page}
+                                        if self.page_number_correction:
+                                                if ending_page != self.st.session_state.document_details["total_pages"]:
+                                                        if ending_page + self.page_number_correction > self.st.session_state.document_details["total_pages"]:
+                                                              ending_page = self.st.session_state.document_details["total_pages"]
+                                                        else:
+                                                              ending_page = ending_page + self.page_number_correction
+                                        
+                                        query = {"page_number": ending_page }
                                         documents = list(self.collection.find(query))
 
                         docs ="\n ".join(doc["text"] for doc in documents if "text" in doc)
@@ -405,7 +477,7 @@ class DocumentProcessing:
                 
                 return questions.get("questions")
                
-        def chat_with_document(self,chat_history, user_question,table_of_contents):  
+        def chat_with_document(self,chat_history, user_question):  
 
                 def image_to_base64(image_path):
                         mime_type, _ = guess_type(image_path)
@@ -417,6 +489,9 @@ class DocumentProcessing:
 
                 def qa_with_image(page_number:int,user_query:str):
                         """Use this tool if the user provides a specific page number and asks for an explanation or has a question about the images on that page. The tool's input should include `page_number`, indicating the page whose images need to be analyzed, and `user_query`, representing the user's question."""
+
+                        if self.page_number_correction and self.page_number_correction + self.page_number_correction < self.st.session_state.document_details["total_pages"]:
+                                page_number += self.page_number_correction
 
                         content= [ { "type": "text", "text": user_query }]
 
@@ -708,11 +783,9 @@ class DocumentProcessing:
 
                         user_text = self.st.text_input(message)
 
-                        submitted = self.st.form_submit_button("Send")
+                        if self.st.form_submit_button("Send"):
 
-                    if submitted:
-
-                        return response
+                                return user_text
 
                 def summarize_document(user_query,starting_page,ending_page):
                         """Use this tool to summarize the document based on the user's query and preferences. The input includes:user_query: The specific aspect the user wants summarized ,user's preference: The preferred style or format of the summary. starting_page and ending_page: Define the page range to be summarized. If the user wants a summary of a single page, set both starting_page and ending_page to the same value"""
@@ -755,6 +828,8 @@ class DocumentProcessing:
                                 right_summary = get_dynamic_summary(right_part, user_query)
 
                                 return get_summary(left_summary + " " + right_summary, user_query)
+                        
+
 
                         if starting_page or ending_page:
 
@@ -762,6 +837,17 @@ class DocumentProcessing:
                                         starting_page = 1
                                 elif not ending_page:
                                         ending_page = self.st.session_state.document_details["total_pages"]
+
+                                if self.st.session_state.document_details["total_pages"]:
+                                        if ending_page != self.st.session_state.document_details["total_pages"]:
+                                                if ending_page + self.page_number_correction > self.st.session_state.document_details["total_pages"]:
+                                                        ending_page = self.st.session_state.document_details["total_pages"]
+                                                else:
+                                                        ending_page = ending_page + self.page_number_correction
+                                        
+                                        if starting_page + self.page_number_correction > self.st.session_state.document_details["total_pages"]:
+                                                
+                                                starting_page  = starting_page + self.page_number_correction
 
                                 if starting_page != ending_page:
                                         query = {"page_number": {"$gte": starting_page, "$lte": ending_page}}
@@ -807,6 +893,9 @@ class DocumentProcessing:
                 def page_based_content_extraction(page_number):
                         """Use this tool to extract content from a specific page. The input should be page_number, indicating the page from which the content needs to be retrieved. If the output from this tool contains <!-- image -->, you should also execute qa_with_image, as that page contains an image."""
                         
+                        if self.page_number_correction and self.page_number_correction + self.page_number_correction < self.st.session_state.document_details["total_pages"]:
+                                page_number += self.page_number_correction
+
                         query = {"page_number": page_number}
                         documents = list(self.collection.find(query))
                         docs = "\n ".join(doc["text"] for doc in documents if "text" in doc)
@@ -850,8 +939,8 @@ class DocumentProcessing:
 
                 prompt_for_agent = ""
 
-                if table_of_contents:
-                       prompt_for_agent = f"Table of content of text book: {table_of_contents}"
+                if self.table_of_contents:
+                       prompt_for_agent = f"Table of content of text book: {self.table_of_contents}"
 
                 if self.st.session_state.document_details["total_pages"]:
                        prompt_for_agent += f"\n Total number of pages in text book: {self.st.session_state.document_details['total_pages']}"
